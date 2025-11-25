@@ -1,0 +1,132 @@
+﻿@page "/"
+@using TesseractOcrTest.Services
+@inject OcrService OcrService
+@inject AiCleanupService AiCleanupService
+@rendermode InteractiveServer
+
+<PageTitle>Tesseract OCR Test</PageTitle>
+
+<div style="max-width: 1200px; margin: 0 auto; padding: 20px;">
+    <h1>Tesseract OCR PDF Test</h1>
+    <p>Upload a PDF file to see what Tesseract extracts from it.</p>
+
+    <div style="margin: 20px 0;">
+        <InputFile OnChange="HandleFileSelected" accept=".pdf" />
+        <button @onclick="ProcessPdf" disabled="@(selectedFile == null || isProcessing)"
+                style="margin-left: 10px; padding: 5px 15px;">
+            @(isProcessing ? "Processing..." : "Process PDF")
+        </button>
+    </div>
+
+    @if (isProcessing)
+    {
+        <div style="margin: 20px 0; padding: 10px; background-color: #e3f2fd; border-radius: 4px;">
+            <p>Processing PDF... This may take a moment.</p>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div style="margin: 20px 0; padding: 10px; background-color: #ffebee; border-radius: 4px; color: #c62828;">
+            <strong>Error:</strong> @errorMessage
+        </div>
+    }
+
+    @if (ocrResult != null && ocrResult.Success)
+    {
+        <div style="margin-top: 30px;">
+            <h2>Raw OCR Output</h2>
+            <textarea readonly style="width: 100%; min-height: 300px; font-family: monospace; padding: 10px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 20px;">@ocrResult.FullText</textarea>
+
+            <button @onclick="CleanWithAi" disabled="@isCleaningWithAi"
+                    style="padding: 10px 20px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px;">
+                @(isCleaningWithAi ? " Cleaning with AI..." : " Clean with AI")
+            </button>
+
+            @if (isCleaningWithAi)
+            {
+                <div style="margin: 20px 0; padding: 10px; background-color: #fff3cd; border-radius: 4px;">
+                    <p>AI is processing... This may take 5-10 seconds.</p>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(ocrResult.CleanedText))
+            {
+                <div style="margin-top: 30px;">
+                    <h2>AI Cleaned Output (Structured Markdown)</h2>
+                    <div style="padding: 15px; border: 2px solid #4CAF50; border-radius: 4px; background-color: #f9f9f9;">
+                        <pre style="white-space: pre-wrap; font-family: monospace; margin: 0; line-height: 1.5;">@ocrResult.CleanedText</pre>
+                    </div>
+                </div>
+            }
+
+            <div style="margin-top: 10px; color: #666;">
+                <small>Total pages processed: @ocrResult.PageTexts.Count</small>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private IBrowserFile? selectedFile;
+    private bool isProcessing = false;
+    private bool isCleaningWithAi = false;
+    private OcrResult? ocrResult;
+    private string errorMessage = string.Empty;
+
+    private void HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        selectedFile = e.File;
+        ocrResult = null;
+        errorMessage = string.Empty;
+    }
+
+    private async Task ProcessPdf()
+    {
+        if (selectedFile == null) return;
+
+        isProcessing = true;
+        errorMessage = string.Empty;
+        ocrResult = null;
+
+        try
+        {
+            var maxFileSize = 10 * 1024 * 1024;
+            using var stream = selectedFile.OpenReadStream(maxFileSize);
+            ocrResult = await OcrService.ProcessPdfAsync(stream);
+
+            if (!ocrResult.Success)
+            {
+                errorMessage = ocrResult.ErrorMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Failed to process file: {ex.Message}";
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private async Task CleanWithAi()
+    {
+        if (ocrResult == null || string.IsNullOrEmpty(ocrResult.FullText)) return;
+
+        isCleaningWithAi = true;
+
+        try
+        {
+            ocrResult.CleanedText = await AiCleanupService.CleanupOcrTextAsync(ocrResult.FullText);
+        }
+        catch (Exception ex)
+        {
+            ocrResult.CleanedText = $"Error during AI cleanup: {ex.Message}";
+        }
+        finally
+        {
+            isCleaningWithAi = false;
+        }
+    }
+}
